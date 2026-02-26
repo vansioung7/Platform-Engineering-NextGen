@@ -6,10 +6,13 @@ This repository now includes a baseline GitHub Actions + OPA + Terraform state/d
 - `.github/workflows/infra-plan.yml`
 - `.github/workflows/infra-apply.yml`
 - `.github/workflows/infra-drift-detection.yml`
+- `.github/workflows/workload-drift-detection.yml`
 - `.github/workflows/drift-ticketing-and-notification.yml`
 - `.github/workflows/drift-remediation-governance.yml`
 - `policies/terraform/deny.rego`
+- `policies/kubernetes/deny.rego`
 - `scripts/native-drift-check.sh`
+- `scripts/workload-drift-check.sh`
 
 ## Target repository layout
 Create these folders in the repo where Terraform is executed:

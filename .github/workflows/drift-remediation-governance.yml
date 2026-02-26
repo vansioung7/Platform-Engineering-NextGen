@@ -14,6 +14,7 @@ on:
     paths:
       - "infra/**"
       - "templates/terraform/**"
+      - "templates/helm/**"
       - "policies/**"
       - ".github/workflows/**"
       - "scripts/**"
@@ -34,6 +35,8 @@ jobs:
       change_request_id: ${{ steps.extract.outputs.change_request_id }}
       environment: ${{ steps.extract.outputs.environment }}
       cloud_provider: ${{ steps.extract.outputs.cloud_provider }}
+      drift_type: ${{ steps.extract.outputs.drift_type }}
+      argocd_app_name: ${{ steps.extract.outputs.argocd_app_name }}
     steps:
       - name: Extract Required Metadata From PR Body
         id: extract
@@ -52,12 +55,16 @@ jobs:
             const changeRequestId = capture(/(?:^|\n)\s*Change Request:\s*([A-Za-z0-9._-]+)\s*(?:\n|$)/i);
             const environment = capture(/(?:^|\n)\s*Environment:\s*(dev|prod)\s*(?:\n|$)/i).toLowerCase();
             const cloudProvider = capture(/(?:^|\n)\s*Cloud Provider:\s*(aws|azure|gcp)\s*(?:\n|$)/i).toLowerCase();
+            const driftType = capture(/(?:^|\n)\s*Drift Type:\s*(infra|workload)\s*(?:\n|$)/i).toLowerCase();
+            const argocdApp = capture(/(?:^|\n)\s*ArgoCD App:\s*([A-Za-z0-9._-]+)\s*(?:\n|$)/i);
 
             core.setOutput("drift_issue_number", driftIssueRaw);
             core.setOutput("jira_key", jiraKey);
             core.setOutput("change_request_id", changeRequestId);
             core.setOutput("environment", environment);
             core.setOutput("cloud_provider", cloudProvider);
+            core.setOutput("drift_type", driftType);
+            core.setOutput("argocd_app_name", argocdApp);
 
   premerge-guard:
     if: github.event.action != 'closed'
@@ -74,6 +81,11 @@ jobs:
           [ -n "${CHANGE_REQUEST_ID}" ] || { echo "Missing 'Change Request: <id>' in PR body"; missing=1; }
           [ -n "${ENVIRONMENT}" ] || { echo "Missing 'Environment: dev|prod' in PR body"; missing=1; }
           [ -n "${CLOUD_PROVIDER}" ] || { echo "Missing 'Cloud Provider: aws|azure|gcp' in PR body"; missing=1; }
+          [ -n "${DRIFT_TYPE}" ] || { echo "Missing 'Drift Type: infra|workload' in PR body"; missing=1; }
+          if [ "${DRIFT_TYPE}" = "workload" ] && [ -z "${ARGOCD_APP_NAME}" ]; then
+            echo "Missing 'ArgoCD App: <name>' in PR body for workload drift remediation"
+            missing=1
+          fi
           if [ "${ENABLE_JIRA_INTEGRATION}" = "true" ] && [ -z "${JIRA_KEY}" ]; then
             echo "Missing 'Jira Key: <KEY-NNN>' in PR body while Jira integration is enabled"
             missing=1
@@ -86,6 +98,8 @@ jobs:
           CHANGE_REQUEST_ID: ${{ needs.metadata.outputs.change_request_id }}
           ENVIRONMENT: ${{ needs.metadata.outputs.environment }}
           CLOUD_PROVIDER: ${{ needs.metadata.outputs.cloud_provider }}
+          DRIFT_TYPE: ${{ needs.metadata.outputs.drift_type }}
+          ARGOCD_APP_NAME: ${{ needs.metadata.outputs.argocd_app_name }}
 
       - name: Enforce Minimum Approvals
         uses: actions/github-script@v7
@@ -117,6 +131,8 @@ jobs:
       CLOUD_PROVIDER: ${{ needs.metadata.outputs.cloud_provider }}
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
       GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      DRIFT_TYPE: ${{ needs.metadata.outputs.drift_type }}
+      ARGOCD_APP_NAME: ${{ needs.metadata.outputs.argocd_app_name }}
     steps:
       - name: Validate Metadata Exists On Merge
         shell: bash
@@ -126,11 +142,18 @@ jobs:
           [ -n "${CHANGE_REQUEST_ID}" ] || { echo "Missing change request metadata"; exit 1; }
           [ -n "${ENVIRONMENT}" ] || { echo "Missing environment metadata"; exit 1; }
           [ -n "${CLOUD_PROVIDER}" ] || { echo "Missing cloud_provider metadata"; exit 1; }
+          [ -n "${DRIFT_TYPE}" ] || { echo "Missing drift_type metadata"; exit 1; }
+          if [ "${DRIFT_TYPE}" = "workload" ] && [ -z "${ARGOCD_APP_NAME}" ]; then
+            echo "Missing ArgoCD app metadata for workload drift remediation"
+            exit 1
+          fi
         env:
           DRIFT_ISSUE_NUMBER: ${{ needs.metadata.outputs.drift_issue_number }}
           CHANGE_REQUEST_ID: ${{ needs.metadata.outputs.change_request_id }}
           ENVIRONMENT: ${{ needs.metadata.outputs.environment }}
           CLOUD_PROVIDER: ${{ needs.metadata.outputs.cloud_provider }}
+          DRIFT_TYPE: ${{ needs.metadata.outputs.drift_type }}
+          ARGOCD_APP_NAME: ${{ needs.metadata.outputs.argocd_app_name }}
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -162,12 +185,14 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Setup Terraform
+        if: env.DRIFT_TYPE == 'infra'
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.8.5
 
-      - name: Verify Drift Closure
-        id: verify_drift
+      - name: Verify Infra Drift Closure
+        id: verify_infra_drift
+        if: env.DRIFT_TYPE == 'infra'
         shell: bash
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
@@ -184,6 +209,57 @@ jobs:
             exit 1
           fi
           exit 0
+
+      - name: Setup Argo CD CLI
+        if: env.DRIFT_TYPE == 'workload'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSL -o /usr/local/bin/argocd "https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64"
+          chmod +x /usr/local/bin/argocd
+
+      - name: Verify Workload Drift Closure
+        id: verify_workload_drift
+        if: env.DRIFT_TYPE == 'workload'
+        shell: bash
+        run: |
+          set +e
+          mkdir -p .artifacts
+          argocd app get "${ARGOCD_APP_NAME}" \
+            --server "${ARGOCD_SERVER}" \
+            --auth-token "${ARGOCD_AUTH_TOKEN}" \
+            --grpc-web \
+            --refresh \
+            -o json > .artifacts/argocd-postmerge.json
+          rc=$?
+          if [ "${rc}" -ne 0 ]; then
+            echo "exit_code=2" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          sync_status="$(jq -r '.status.sync.status // "Unknown"' .artifacts/argocd-postmerge.json)"
+          if [ "${sync_status}" = "Synced" ]; then
+            echo "exit_code=0" >> "${GITHUB_OUTPUT}"
+          else
+            echo "exit_code=2" >> "${GITHUB_OUTPUT}"
+          fi
+          exit 0
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+
+      - name: Resolve Verification Exit Code
+        id: resolve_verify
+        shell: bash
+        run: |
+          if [ "${DRIFT_TYPE}" = "workload" ]; then
+            echo "exit_code=${WORKLOAD_EXIT_CODE:-2}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "exit_code=${INFRA_EXIT_CODE:-2}" >> "${GITHUB_OUTPUT}"
+          fi
+        env:
+          DRIFT_TYPE: ${{ env.DRIFT_TYPE }}
+          INFRA_EXIT_CODE: ${{ steps.verify_infra_drift.outputs.exit_code }}
+          WORKLOAD_EXIT_CODE: ${{ steps.verify_workload_drift.outputs.exit_code }}
 
       - name: Build Change Audit Record
         shell: bash
@@ -202,7 +278,9 @@ jobs:
             "change_request_id": "${{ needs.metadata.outputs.change_request_id }}",
             "environment": "${{ needs.metadata.outputs.environment }}",
             "cloud_provider": "${{ needs.metadata.outputs.cloud_provider }}",
-            "drift_verify_exit_code": "${{ steps.verify_drift.outputs.exit_code }}"
+            "drift_type": "${{ needs.metadata.outputs.drift_type }}",
+            "argocd_app_name": "${{ needs.metadata.outputs.argocd_app_name }}",
+            "drift_verify_exit_code": "${{ steps.resolve_verify.outputs.exit_code }}"
           }
           EOF
 
@@ -213,7 +291,7 @@ jobs:
           path: .artifacts/drift-audit-pr-${{ github.event.pull_request.number }}.json
 
       - name: Close Drift Issue (Verified)
-        if: steps.verify_drift.outputs.exit_code == '0'
+        if: steps.resolve_verify.outputs.exit_code == '0'
         uses: actions/github-script@v7
         with:
           script: |
@@ -235,7 +313,7 @@ jobs:
           DRIFT_ISSUE_NUMBER: ${{ needs.metadata.outputs.drift_issue_number }}
 
       - name: Comment Drift Issue (Still Drifted)
-        if: steps.verify_drift.outputs.exit_code == '2'
+        if: steps.resolve_verify.outputs.exit_code == '2'
         uses: actions/github-script@v7
         with:
           script: |
@@ -251,7 +329,7 @@ jobs:
           DRIFT_ISSUE_NUMBER: ${{ needs.metadata.outputs.drift_issue_number }}
 
       - name: Transition Jira to Done
-        if: steps.verify_drift.outputs.exit_code == '0' && vars.ENABLE_JIRA_INTEGRATION == 'true' && needs.metadata.outputs.jira_key != ''
+        if: steps.resolve_verify.outputs.exit_code == '0' && vars.ENABLE_JIRA_INTEGRATION == 'true' && needs.metadata.outputs.jira_key != ''
         shell: bash
         run: |
           set -euo pipefail
@@ -286,9 +364,8 @@ jobs:
             --arg issue "${{ needs.metadata.outputs.drift_issue_number }}" \
             --arg jira "${{ needs.metadata.outputs.jira_key }}" \
             --arg cr "${{ needs.metadata.outputs.change_request_id }}" \
-            --arg verify "${{ steps.verify_drift.outputs.exit_code }}" \
+            --arg verify "${{ steps.resolve_verify.outputs.exit_code }}" \
             '{event:$event,repository:$repo,pull_request:$pr,drift_issue:$issue,jira_key:$jira,change_request:$cr,verify_exit_code:$verify}')"
           curl -sS -X POST -H "Content-Type: application/json" --data "${payload}" "${DRIFT_NOTIFICATION_WEBHOOK_URL}"
         env:
           DRIFT_NOTIFICATION_WEBHOOK_URL: ${{ secrets.DRIFT_NOTIFICATION_WEBHOOK_URL }}
-

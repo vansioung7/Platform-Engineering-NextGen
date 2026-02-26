@@ -43,7 +43,9 @@ Repository scaffolding is included for infrastructure orchestration:
 - PR orchestration: `.github/workflows/infra-plan.yml`
 - Apply orchestration: `.github/workflows/infra-apply.yml`
 - Scheduled drift detection: `.github/workflows/infra-drift-detection.yml`
+- Scheduled workload drift detection: `.github/workflows/workload-drift-detection.yml`
 - OPA policy checks: `policies/terraform/deny.rego`
+- Kubernetes manifest policy checks: `policies/kubernetes/deny.rego`
 - Optional native cloud checks with toggle (`enable_native_checks`) for `aws` / `azure` / `gcp`
 - OIDC auth steps are included for AWS/Azure/GCP workflows (configure cloud-specific repo/environment variables)
 
