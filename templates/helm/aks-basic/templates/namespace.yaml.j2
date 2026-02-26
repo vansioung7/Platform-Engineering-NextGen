@@ -1,0 +1,8 @@
+﻿{% if create_namespace %}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ namespace }}
+{% else %}
+# Namespace creation disabled. Namespace {{ namespace }} must already exist.
+{% endif %}

@@ -1,0 +1,82 @@
+﻿variable "subnet_id" {
+  type        = string
+  description = "Subnet ID for AKS nodes"
+}
+
+variable "node_pool_desired_size" {
+  type        = number
+  description = "Desired AKS node count"
+  default     = 3
+}
+
+variable "node_pool_min_size" {
+  type        = number
+  description = "Minimum AKS node pool size"
+  default     = 2
+}
+
+variable "node_pool_max_size" {
+  type        = number
+  description = "Maximum AKS node pool size"
+  default     = 6
+}
+
+variable "vm_size" {
+  type        = string
+  description = "VM size for AKS nodes"
+  default     = "Standard_D4s_v5"
+}
+
+variable "patch_day_of_week" {
+  type        = string
+  description = "Patch window day for AKS maintenance"
+  default     = "Sunday"
+}
+
+variable "patch_start_hour_utc" {
+  type        = number
+  description = "Patch window starting hour in UTC for AKS"
+  default     = 2
+}
+
+variable "cluster_autoscaling_enabled" {
+  type        = bool
+  description = "Enable AKS node pool autoscaling"
+  default     = true
+}
+
+variable "cluster_autoscaler_scan_interval" {
+  type        = string
+  description = "AKS cluster autoscaler scan interval (e.g. 10s)"
+  default     = "10s"
+}
+
+variable "cluster_autoscaler_scale_down_delay_after_add" {
+  type        = string
+  description = "Delay before scale down after scale up (e.g. 10m)"
+  default     = "10m"
+}
+
+variable "cluster_autoscaler_scale_down_unneeded" {
+  type        = string
+  description = "How long a node should be unneeded before scale down (e.g. 10m)"
+  default     = "10m"
+}
+
+variable "cluster_autoscaler_scale_down_unready" {
+  type        = string
+  description = "How long an unready node should exist before scale down (e.g. 20m)"
+  default     = "20m"
+}
+
+variable "cluster_autoscaler_scale_down_utilization_threshold" {
+  type        = number
+  description = "Node utilization threshold for scale down"
+  default     = 0.5
+}
+
+variable "cluster_autoscaler_max_graceful_termination_sec" {
+  type        = number
+  description = "Maximum graceful termination period in seconds during scale down"
+  default     = 600
+}

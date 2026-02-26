@@ -1,0 +1,60 @@
+﻿{% if (scaling_alerts_enabled and scaling_alerts_provider == "grafana") or (quota_alerts_enabled and quota_alerts_provider == "grafana") %}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ chart_name }}-alerts
+  namespace: {{ namespace }}
+  labels:
+    app: {{ chart_name }}
+spec:
+  groups:
+    - name: {{ chart_name }}.alerts
+      rules:
+{% if scaling_alerts_enabled and scaling_alerts_provider == "grafana" %}
+        - alert: {{ chart_name | replace("-", "_") | upper }}_POD_SCALING_EVENT
+          expr: changes(kube_deployment_status_replicas{namespace="{{ namespace }}",deployment="{{ chart_name }}"}[{{ scaling_alerts_pod_window }}]) > 0
+          for: {{ scaling_alerts_pod_for }}
+          labels:
+            severity: info
+            priority: low
+            source: kubernetes
+            signal: scaling
+            scope: pod
+          annotations:
+            summary: "Pod scaling detected for {{ chart_name }}"
+            description: "Deployment replica count changed in the last {{ scaling_alerts_pod_window }}."
+
+        - alert: {{ chart_name | replace("-", "_") | upper }}_NODE_SCALING_EVENT
+          expr: abs(delta(sum(kube_node_status_allocatable{resource="cpu",unit="core"})[{{ scaling_alerts_node_window }}])) > 0
+          for: {{ scaling_alerts_node_for }}
+          labels:
+            severity: info
+            priority: low
+            source: kubernetes
+            signal: scaling
+            scope: node
+          annotations:
+            summary: "Node scaling detected in cluster"
+            description: "Total allocatable CPU changed in the last {{ scaling_alerts_node_window }}, indicating node scale out/in."
+{% endif %}
+{% if quota_alerts_enabled and quota_alerts_provider == "grafana" %}
+        - alert: {{ chart_name | replace("-", "_") | upper }}_NODE_QUOTA_HIGH
+          expr: (
+            sum(kube_pod_container_resource_requests{resource="cpu",unit="core"})
+            /
+            clamp_min(sum(kube_node_status_allocatable{resource="cpu",unit="core"}), 0.001)
+          ) * 100 > {{ quota_alerts_node_usage_threshold_percent }}
+          for: {{ quota_alerts_node_for }}
+          labels:
+            severity: critical
+            priority: high
+            source: kubernetes
+            signal: quota
+            scope: node
+          annotations:
+            summary: "High node quota usage in cluster"
+            description: "Requested CPU is above {{ quota_alerts_node_usage_threshold_percent }}% of allocatable node CPU."
+{% endif %}
+{% else %}
+# Grafana scaling/quota alerts disabled.
+{% endif %}

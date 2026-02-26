@@ -1,0 +1,60 @@
+﻿terraform {
+  required_version = ">= 1.6.0"
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 4.0"
+    }
+  }
+}
+
+provider "azurerm" {
+  features {}
+  subscription_id = "{{ subscription_id }}"
+}
+
+resource "azurerm_resource_group" "rg" {
+  name     = "{{ resource_group_name }}"
+  location = "{{ location }}"
+}
+
+resource "azurerm_kubernetes_cluster" "aks" {
+  name                = "{{ cluster_name }}"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  dns_prefix          = "{{ dns_prefix }}"
+
+  default_node_pool {
+    name                = "system"
+    vm_size             = var.vm_size
+    vnet_subnet_id      = var.subnet_id
+    node_count          = var.node_pool_desired_size
+    enable_auto_scaling = var.cluster_autoscaling_enabled
+    min_count           = var.node_pool_min_size
+    max_count           = var.node_pool_max_size
+  }
+
+  auto_scaler_profile {
+    scan_interval                 = var.cluster_autoscaler_scan_interval
+    scale_down_delay_after_add    = var.cluster_autoscaler_scale_down_delay_after_add
+    scale_down_unneeded           = var.cluster_autoscaler_scale_down_unneeded
+    scale_down_unready            = var.cluster_autoscaler_scale_down_unready
+    scale_down_utilization_threshold = var.cluster_autoscaler_scale_down_utilization_threshold
+    max_graceful_termination_sec  = var.cluster_autoscaler_max_graceful_termination_sec
+  }
+
+  maintenance_window {
+    allowed {
+      day   = var.patch_day_of_week
+      hours = [var.patch_start_hour_utc]
+    }
+  }
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  tags = {
+    project = "{{ project }}"
+  }
+}

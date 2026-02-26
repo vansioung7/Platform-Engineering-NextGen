@@ -1,0 +1,45 @@
+﻿variable "vpc_id" {
+  type        = string
+  description = "VPC ID for EKS cluster"
+}
+
+variable "subnet_ids" {
+  type        = list(string)
+  description = "Private subnet IDs for EKS worker nodes"
+}
+
+variable "node_pool_min_size" {
+  type        = number
+  description = "Minimum size of EKS managed node pool"
+  default     = 2
+}
+
+variable "node_pool_max_size" {
+  type        = number
+  description = "Maximum size of EKS managed node pool"
+  default     = 6
+}
+
+variable "node_pool_desired_size" {
+  type        = number
+  description = "Desired size of EKS managed node pool"
+  default     = 3
+}
+
+variable "node_pool_instance_type" {
+  type        = string
+  description = "EC2 instance type for EKS managed node pool"
+  default     = "t3.large"
+}
+
+variable "node_pool_max_unavailable" {
+  type        = number
+  description = "Max unavailable nodes during managed node group updates"
+  default     = 1
+}
+
+variable "cluster_autoscaling_enabled" {
+  type        = bool
+  description = "Enable cluster-autoscaler discovery tags on EKS node group"
+  default     = true
+}

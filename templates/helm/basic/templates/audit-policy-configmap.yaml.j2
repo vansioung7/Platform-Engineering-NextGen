@@ -1,0 +1,25 @@
+﻿{% if audit_enabled %}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ chart_name }}-audit-policy
+  namespace: {{ namespace }}
+data:
+  policy.yaml: |
+    apiVersion: platform/v1
+    kind: AuditPolicy
+    metadata:
+      name: {{ chart_name }}
+      version: "{{ audit_policy_version }}"
+    spec:
+      mode: "{{ audit_mode }}"
+      includeRequestBody: {{ audit_include_request_body }}
+      capture:
+        - authentication
+        - authorization
+        - request
+        - response
+        - config_changes
+{% else %}
+# Audit policy disabled.
+{% endif %}

@@ -1,0 +1,16 @@
+﻿{% if quota_enabled %}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ chart_name }}-quota
+  namespace: {{ namespace }}
+spec:
+  hard:
+    requests.cpu: "{{ quota_requests_cpu }}"
+    requests.memory: "{{ quota_requests_memory }}"
+    limits.cpu: "{{ quota_limits_cpu }}"
+    limits.memory: "{{ quota_limits_memory }}"
+    pods: "{{ quota_pods }}"
+{% else %}
+# ResourceQuota disabled.
+{% endif %}

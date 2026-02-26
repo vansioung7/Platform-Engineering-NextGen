@@ -1,0 +1,22 @@
+﻿apiVersion: v1
+kind: Service
+metadata:
+  name: {{ chart_name }}
+  namespace: {{ namespace }}
+  labels:
+    app: {{ chart_name }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ chart_name }}
+  ports:
+    - name: http
+      port: {{ service_port }}
+      targetPort: {{ container_port }}
+      protocol: TCP
+{% if metrics_enabled and metrics_app_enabled %}
+    - name: metrics
+      port: {{ metrics_app_port }}
+      targetPort: {{ metrics_app_port }}
+      protocol: TCP
+{% endif %}

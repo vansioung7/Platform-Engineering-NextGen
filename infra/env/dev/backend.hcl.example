@@ -1,0 +1,17 @@
+# AWS example
+# bucket         = "my-tf-state-bucket"
+# key            = "platform/dev/terraform.tfstate"
+# region         = "us-east-1"
+# dynamodb_table = "my-tf-state-locks"
+# encrypt        = true
+
+# Azure example
+# resource_group_name  = "rg-tf-state"
+# storage_account_name = "mytfstateacct"
+# container_name       = "tfstate"
+# key                  = "platform/dev/terraform.tfstate"
+
+# GCP example
+# bucket = "my-tf-state-bucket"
+# prefix = "platform/dev"
+

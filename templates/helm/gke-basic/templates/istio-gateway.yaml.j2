@@ -1,0 +1,19 @@
+﻿{% if istio_enabled and istio_ingress_enabled and istio_gateway_create %}
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: {{ istio_gateway_name }}
+  namespace: {{ istio_gateway_namespace }}
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: {{ istio_gateway_port }}
+        name: http
+        protocol: HTTP
+      hosts:
+        - "{{ istio_gateway_host }}"
+{% else %}
+# Istio ingress gateway creation disabled.
+{% endif %}

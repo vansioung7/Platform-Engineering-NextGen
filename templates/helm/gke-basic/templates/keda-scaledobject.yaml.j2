@@ -1,0 +1,31 @@
+﻿{% if keda_enabled %}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ chart_name }}-keda
+  namespace: {{ namespace }}
+spec:
+  scaleTargetRef:
+    name: {{ chart_name }}
+  minReplicaCount: {{ keda_min_replicas }}
+  maxReplicaCount: {{ keda_max_replicas }}
+  pollingInterval: {{ keda_polling_interval }}
+  cooldownPeriod: {{ keda_cooldown_period }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: {{ keda_scale_up_stabilization_window }}
+        scaleDown:
+          stabilizationWindowSeconds: {{ keda_scale_down_stabilization_window }}
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: "{{ keda_prometheus_server_address }}"
+        metricName: "{{ keda_metric_name }}"
+        query: "{{ keda_query }}"
+        threshold: "{{ keda_threshold }}"
+        activationThreshold: "{{ keda_activation_threshold }}"
+{% else %}
+# KEDA autoscaling disabled.
+{% endif %}

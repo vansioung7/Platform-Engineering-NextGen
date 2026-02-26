@@ -1,0 +1,165 @@
+name: infra-drift-detection
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
+      cloud_provider:
+        description: "Cloud provider for native checks"
+        required: true
+        default: "aws"
+        type: choice
+        options:
+          - aws
+          - azure
+          - gcp
+      enable_native_checks:
+        description: "Enable cloud-native checks"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    env:
+      TF_WORKING_DIR: infra/terraform
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+      CLOUD_PROVIDER: ${{ github.event.inputs.cloud_provider || vars.CLOUD_PROVIDER || 'aws' }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        if: env.CLOUD_PROVIDER == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Azure Login (OIDC)
+        if: env.CLOUD_PROVIDER == 'azure'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Authenticate to Google Cloud (OIDC)
+        if: env.CLOUD_PROVIDER == 'gcp'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        if: env.CLOUD_PROVIDER == 'gcp'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+
+      - name: Terraform Init
+        shell: bash
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          if [ -f "../env/${ENVIRONMENT}/backend.hcl" ]; then
+            terraform init -input=false -backend-config=../env/${ENVIRONMENT}/backend.hcl
+          else
+            terraform init -input=false
+          fi
+
+      - name: Terraform Drift Plan
+        id: drift_plan
+        shell: bash
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          set +e
+          terraform plan -detailed-exitcode -input=false -out=tfplan
+          EXIT_CODE=$?
+          echo "exit_code=${EXIT_CODE}" >> "${GITHUB_OUTPUT}"
+          if [ "${EXIT_CODE}" -eq 1 ]; then
+            exit 1
+          fi
+          exit 0
+
+      - name: Export Drift Plan JSON
+        if: steps.drift_plan.outputs.exit_code == '2'
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform show -json tfplan > tfplan.json
+
+      - name: Upload Drift Artifact
+        if: steps.drift_plan.outputs.exit_code == '2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfdrift-${{ env.ENVIRONMENT }}
+          path: |
+            ${{ env.TF_WORKING_DIR }}/tfplan
+            ${{ env.TF_WORKING_DIR }}/tfplan.json
+
+      - name: Run Native Cloud Checks
+        if: (github.event_name == 'workflow_dispatch' && github.event.inputs.enable_native_checks == 'true') || (github.event_name != 'workflow_dispatch' && vars.ENABLE_NATIVE_CHECKS == 'true')
+        shell: bash
+        run: |
+          chmod +x ./scripts/native-drift-check.sh
+          ./scripts/native-drift-check.sh "${CLOUD_PROVIDER}"
+        env:
+          NATIVE_CHECKS_AWS_COMMAND: ${{ vars.NATIVE_CHECKS_AWS_COMMAND }}
+          NATIVE_CHECKS_AZURE_COMMAND: ${{ vars.NATIVE_CHECKS_AZURE_COMMAND }}
+          NATIVE_CHECKS_GCP_COMMAND: ${{ vars.NATIVE_CHECKS_GCP_COMMAND }}
+
+      - name: Upload Native Check Report
+        if: (github.event_name == 'workflow_dispatch' && github.event.inputs.enable_native_checks == 'true') || (github.event_name != 'workflow_dispatch' && vars.ENABLE_NATIVE_CHECKS == 'true')
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-checks-${{ env.CLOUD_PROVIDER }}-${{ env.ENVIRONMENT }}
+          path: native-check-report.md
+
+      - name: Create Drift Issue
+        if: steps.drift_plan.outputs.exit_code == '2'
+        uses: actions/github-script@v7
+        env:
+          NATIVE_CHECKS_EFFECTIVE: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.enable_native_checks == 'true') || (github.event_name != 'workflow_dispatch' && vars.ENABLE_NATIVE_CHECKS == 'true') }}
+        with:
+          script: |
+            const envName = process.env.ENVIRONMENT;
+            const cloudProvider = process.env.CLOUD_PROVIDER;
+            const nativeChecks = process.env.NATIVE_CHECKS_EFFECTIVE;
+            const today = new Date().toISOString().slice(0, 10);
+            const title = `[drift] Terraform drift detected in ${envName} (${today})`;
+            const body = [
+              `Drift was detected by workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              `Cloud provider: ${cloudProvider}`,
+              `Native checks enabled: ${nativeChecks}`,
+              "",
+              "Next actions:",
+              "1. Review plan output artifacts.",
+              "2. Review native-check-report artifact when native checks are enabled.",
+              "3. Confirm if drift is expected/manual.",
+              "4. Reconcile via pull request and infra-apply."
+            ].join("\n");
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ["infra", "drift"]
+            });

@@ -1,0 +1,156 @@
+﻿replicaCount: {{ replica_count }}
+
+namespace: {{ namespace }}
+createNamespace: {{ create_namespace }}
+
+image:
+  repository: {{ image_repository }}
+  tag: "{{ image_tag }}"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: {{ service_port }}
+
+containerPort: {{ container_port }}
+
+resources:
+  requests:
+    cpu: "{{ cpu_request }}"
+    memory: "{{ memory_request }}"
+  limits:
+    cpu: "{{ cpu_limit }}"
+    memory: "{{ memory_limit }}"
+
+metrics:
+  enabled: {{ metrics_enabled }}
+  appEnabled: {{ metrics_app_enabled }}
+  appPath: "{{ metrics_app_path }}"
+  appPort: {{ metrics_app_port }}
+  podMonitorEnabled: {{ metrics_pod_monitor_enabled }}
+  serviceMonitorEnabled: {{ metrics_service_monitor_enabled }}
+  podMonitorInterval: "{{ metrics_pod_monitor_interval }}"
+  podMonitorScrapeTimeout: "{{ metrics_pod_monitor_scrape_timeout }}"
+
+affinity:
+  enabled: {{ affinity_enabled }}
+  type: "{{ affinity_type }}"
+  topologyKey: "{{ affinity_topology_key }}"
+
+hpa:
+  enabled: {{ hpa_enabled }}
+  minReplicas: {{ hpa_min_replicas }}
+  maxReplicas: {{ hpa_max_replicas }}
+  cpuUtilizationTarget: {{ hpa_cpu_utilization_target }}
+  memoryUtilizationTarget: {{ hpa_memory_utilization_target }}
+
+keda:
+  enabled: {{ keda_enabled }}
+  minReplicas: {{ keda_min_replicas }}
+  maxReplicas: {{ keda_max_replicas }}
+  pollingInterval: {{ keda_polling_interval }}
+  cooldownPeriod: {{ keda_cooldown_period }}
+  threshold: "{{ keda_threshold }}"
+  activationThreshold: "{{ keda_activation_threshold }}"
+  prometheusServerAddress: "{{ keda_prometheus_server_address }}"
+  metricName: "{{ keda_metric_name }}"
+  query: "{{ keda_query }}"
+  scaleUpStabilizationWindow: {{ keda_scale_up_stabilization_window }}
+  scaleDownStabilizationWindow: {{ keda_scale_down_stabilization_window }}
+
+istio:
+  enabled: {{ istio_enabled }}
+  ingressEnabled: {{ istio_ingress_enabled }}
+  egressEnabled: {{ istio_egress_enabled }}
+  gateway:
+    create: {{ istio_gateway_create }}
+    name: "{{ istio_gateway_name }}"
+    namespace: "{{ istio_gateway_namespace }}"
+    host: "{{ istio_gateway_host }}"
+    port: {{ istio_gateway_port }}
+    ref: "{{ istio_gateway_ref }}"
+  virtualService:
+    host: "{{ istio_virtual_service_host }}"
+    prefix: "{{ istio_virtual_service_prefix }}"
+  egress:
+    host: "{{ istio_egress_host }}"
+    port: {{ istio_egress_port }}
+    protocol: "{{ istio_egress_protocol }}"
+
+throttle:
+  enabled: {{ throttle_enabled }}
+  maxTokens: {{ throttle_max_tokens }}
+  tokensPerFill: {{ throttle_tokens_per_fill }}
+  fillInterval: "{{ throttle_fill_interval }}"
+
+logs:
+  enabled: {{ logs_enabled }}
+  format: "{{ logs_format }}"
+  level: "{{ logs_level }}"
+  provider: "{{ logs_provider }}"
+
+  grafanaCloud:
+    logsUrl: "{{ logs_grafana_cloud_logs_url }}"
+    tenantId: "{{ logs_grafana_cloud_tenant_id }}"
+    authSecretName: "{{ logs_grafana_cloud_auth_secret_name }}"
+    authSecretCreate: {{ logs_grafana_cloud_auth_secret_create }}
+    authUser: "{{ logs_grafana_cloud_auth_user }}"
+    authToken: "{{ logs_grafana_cloud_auth_token }}"
+
+  splunk:
+    hecUrl: "{{ logs_splunk_hec_url }}"
+    index: "{{ logs_splunk_index }}"
+    source: "{{ logs_splunk_source }}"
+    sourcetype: "{{ logs_splunk_sourcetype }}"
+    tokenSecretName: "{{ logs_splunk_token_secret_name }}"
+    tokenSecretCreate: {{ logs_splunk_token_secret_create }}
+    token: "{{ logs_splunk_token }}"
+
+telemetry:
+  enabled: {{ telemetry_enabled }}
+  provider: "{{ telemetry_provider }}"
+
+  metricsEnabled: {{ telemetry_metrics_enabled }}
+  tracesEnabled: {{ telemetry_traces_enabled }}
+  logsEnabled: {{ telemetry_logs_enabled }}
+
+  otlpEndpoint: "{{ telemetry_otlp_endpoint }}"
+  otlpProtocol: "{{ telemetry_otlp_protocol }}"
+  authHeaderName: "{{ telemetry_auth_header_name }}"
+  authSecretName: "{{ telemetry_auth_secret_name }}"
+  authSecretCreate: {{ telemetry_auth_secret_create }}
+  authToken: "{{ telemetry_auth_token }}"
+
+audit:
+  enabled: {{ audit_enabled }}
+  mode: "{{ audit_mode }}"
+  includeRequestBody: {{ audit_include_request_body }}
+  policyVersion: "{{ audit_policy_version }}"
+
+workloadPolicy:
+  pdbEnabled: {{ pdb_enabled }}
+  pdbMinAvailable: "{{ pdb_min_available }}"
+  pdbMaxUnavailable: "{{ pdb_max_unavailable }}"
+
+quota:
+  enabled: {{ quota_enabled }}
+  requestsCpu: "{{ quota_requests_cpu }}"
+  requestsMemory: "{{ quota_requests_memory }}"
+  limitsCpu: "{{ quota_limits_cpu }}"
+  limitsMemory: "{{ quota_limits_memory }}"
+  pods: "{{ quota_pods }}"
+
+scalingAlerts:
+  enabled: {{ scaling_alerts_enabled }}
+  provider: "{{ scaling_alerts_provider }}"
+  severity: "{{ scaling_alerts_severity }}"
+  podWindow: "{{ scaling_alerts_pod_window }}"
+  nodeWindow: "{{ scaling_alerts_node_window }}"
+  podFor: "{{ scaling_alerts_pod_for }}"
+  nodeFor: "{{ scaling_alerts_node_for }}"
+
+quotaAlerts:
+  enabled: {{ quota_alerts_enabled }}
+  provider: "{{ quota_alerts_provider }}"
+  nodeUsageThresholdPercent: {{ quota_alerts_node_usage_threshold_percent }}
+  nodeFor: "{{ quota_alerts_node_for }}"

@@ -1,0 +1,114 @@
+name: infra-plan
+
+on:
+  pull_request:
+    paths:
+      - "templates/terraform/**"
+      - "policies/**"
+      - "infra/**"
+      - ".github/workflows/infra-*.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
+      cloud_provider:
+        description: "Cloud provider"
+        required: true
+        default: "aws"
+        type: choice
+        options:
+          - aws
+          - azure
+          - gcp
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    env:
+      TF_WORKING_DIR: infra/terraform
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+      CLOUD_PROVIDER: ${{ github.event.inputs.cloud_provider || vars.CLOUD_PROVIDER || 'aws' }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        if: env.CLOUD_PROVIDER == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Azure Login (OIDC)
+        if: env.CLOUD_PROVIDER == 'azure'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Authenticate to Google Cloud (OIDC)
+        if: env.CLOUD_PROVIDER == 'gcp'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        if: env.CLOUD_PROVIDER == 'gcp'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+
+      - name: Setup Conftest
+        uses: instrumenta/conftest-action@v1
+
+      - name: Terraform Init
+        shell: bash
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          if [ -f "../env/${ENVIRONMENT}/backend.hcl" ]; then
+            terraform init -input=false -backend-config=../env/${ENVIRONMENT}/backend.hcl
+          else
+            terraform init -input=false
+          fi
+
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Export Plan JSON
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform show -json tfplan > tfplan.json
+
+      - name: OPA Policy Check
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: conftest test tfplan.json -p ../../policies/terraform
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ env.ENVIRONMENT }}
+          path: |
+            ${{ env.TF_WORKING_DIR }}/tfplan
+            ${{ env.TF_WORKING_DIR }}/tfplan.json

@@ -1,0 +1,294 @@
+name: drift-remediation-governance
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - ready_for_review
+      - closed
+    branches:
+      - main
+    paths:
+      - "infra/**"
+      - "templates/terraform/**"
+      - "policies/**"
+      - ".github/workflows/**"
+      - "scripts/**"
+      - "docs/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      drift_issue_number: ${{ steps.extract.outputs.drift_issue_number }}
+      jira_key: ${{ steps.extract.outputs.jira_key }}
+      change_request_id: ${{ steps.extract.outputs.change_request_id }}
+      environment: ${{ steps.extract.outputs.environment }}
+      cloud_provider: ${{ steps.extract.outputs.cloud_provider }}
+    steps:
+      - name: Extract Required Metadata From PR Body
+        id: extract
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.pull_request.body || "";
+
+            function capture(regex) {
+              const m = body.match(regex);
+              return m ? m[1].trim() : "";
+            }
+
+            const driftIssueRaw = capture(/(?:^|\n)\s*Drift Issue:\s*#?(\d+)\s*(?:\n|$)/i);
+            const jiraKey = capture(/(?:^|\n)\s*Jira Key:\s*([A-Z][A-Z0-9]+-\d+)\s*(?:\n|$)/i);
+            const changeRequestId = capture(/(?:^|\n)\s*Change Request:\s*([A-Za-z0-9._-]+)\s*(?:\n|$)/i);
+            const environment = capture(/(?:^|\n)\s*Environment:\s*(dev|prod)\s*(?:\n|$)/i).toLowerCase();
+            const cloudProvider = capture(/(?:^|\n)\s*Cloud Provider:\s*(aws|azure|gcp)\s*(?:\n|$)/i).toLowerCase();
+
+            core.setOutput("drift_issue_number", driftIssueRaw);
+            core.setOutput("jira_key", jiraKey);
+            core.setOutput("change_request_id", changeRequestId);
+            core.setOutput("environment", environment);
+            core.setOutput("cloud_provider", cloudProvider);
+
+  premerge-guard:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    needs:
+      - metadata
+    steps:
+      - name: Validate Mandatory Drift Remediation Metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          [ -n "${DRIFT_ISSUE_NUMBER}" ] || { echo "Missing 'Drift Issue: #<number>' in PR body"; missing=1; }
+          [ -n "${CHANGE_REQUEST_ID}" ] || { echo "Missing 'Change Request: <id>' in PR body"; missing=1; }
+          [ -n "${ENVIRONMENT}" ] || { echo "Missing 'Environment: dev|prod' in PR body"; missing=1; }
+          [ -n "${CLOUD_PROVIDER}" ] || { echo "Missing 'Cloud Provider: aws|azure|gcp' in PR body"; missing=1; }
+          if [ "${ENABLE_JIRA_INTEGRATION}" = "true" ] && [ -z "${JIRA_KEY}" ]; then
+            echo "Missing 'Jira Key: <KEY-NNN>' in PR body while Jira integration is enabled"
+            missing=1
+          fi
+          [ "${missing}" -eq 0 ] || exit 1
+        env:
+          ENABLE_JIRA_INTEGRATION: ${{ vars.ENABLE_JIRA_INTEGRATION || 'false' }}
+          DRIFT_ISSUE_NUMBER: ${{ needs.metadata.outputs.drift_issue_number }}
+          JIRA_KEY: ${{ needs.metadata.outputs.jira_key }}
+          CHANGE_REQUEST_ID: ${{ needs.metadata.outputs.change_request_id }}
+          ENVIRONMENT: ${{ needs.metadata.outputs.environment }}
+          CLOUD_PROVIDER: ${{ needs.metadata.outputs.cloud_provider }}
+
+      - name: Enforce Minimum Approvals
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const required = Number(process.env.MIN_DRIFT_PR_APPROVALS || "1");
+            const { owner, repo } = context.repo;
+            const pull_number = context.payload.pull_request.number;
+            const reviews = await github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number, per_page: 100 });
+
+            const latestByUser = new Map();
+            for (const r of reviews) latestByUser.set(r.user.login, r.state);
+            const approvals = Array.from(latestByUser.values()).filter((s) => s === "APPROVED").length;
+            const changeRequests = Array.from(latestByUser.values()).filter((s) => s === "CHANGES_REQUESTED").length;
+
+            if (changeRequests > 0) core.setFailed(`Cannot proceed: ${changeRequests} reviewer(s) requested changes.`);
+            if (approvals < required) core.setFailed(`Approvals ${approvals}/${required}. Need at least ${required} approvals.`);
+        env:
+          MIN_DRIFT_PR_APPROVALS: ${{ vars.MIN_DRIFT_PR_APPROVALS || '1' }}
+
+  postmerge-closure:
+    if: github.event.action == 'closed' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    needs:
+      - metadata
+    env:
+      TF_WORKING_DIR: infra/terraform
+      ENVIRONMENT: ${{ needs.metadata.outputs.environment }}
+      CLOUD_PROVIDER: ${{ needs.metadata.outputs.cloud_provider }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+    steps:
+      - name: Validate Metadata Exists On Merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "${DRIFT_ISSUE_NUMBER}" ] || { echo "Missing drift issue metadata"; exit 1; }
+          [ -n "${CHANGE_REQUEST_ID}" ] || { echo "Missing change request metadata"; exit 1; }
+          [ -n "${ENVIRONMENT}" ] || { echo "Missing environment metadata"; exit 1; }
+          [ -n "${CLOUD_PROVIDER}" ] || { echo "Missing cloud_provider metadata"; exit 1; }
+        env:
+          DRIFT_ISSUE_NUMBER: ${{ needs.metadata.outputs.drift_issue_number }}
+          CHANGE_REQUEST_ID: ${{ needs.metadata.outputs.change_request_id }}
+          ENVIRONMENT: ${{ needs.metadata.outputs.environment }}
+          CLOUD_PROVIDER: ${{ needs.metadata.outputs.cloud_provider }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        if: env.CLOUD_PROVIDER == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Azure Login (OIDC)
+        if: env.CLOUD_PROVIDER == 'azure'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Authenticate to Google Cloud (OIDC)
+        if: env.CLOUD_PROVIDER == 'gcp'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        if: env.CLOUD_PROVIDER == 'gcp'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+
+      - name: Verify Drift Closure
+        id: verify_drift
+        shell: bash
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          set +e
+          if [ -f "../env/${ENVIRONMENT}/backend.hcl" ]; then
+            terraform init -input=false -backend-config=../env/${ENVIRONMENT}/backend.hcl
+          else
+            terraform init -input=false
+          fi
+          terraform plan -detailed-exitcode -input=false -out=tfplan
+          rc=$?
+          echo "exit_code=${rc}" >> "${GITHUB_OUTPUT}"
+          if [ "${rc}" -eq 1 ]; then
+            exit 1
+          fi
+          exit 0
+
+      - name: Build Change Audit Record
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts
+          cat > ".artifacts/drift-audit-pr-${{ github.event.pull_request.number }}.json" <<EOF
+          {
+            "timestamp_utc": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "repository": "${{ github.repository }}",
+            "pull_request": ${{ github.event.pull_request.number }},
+            "merge_commit_sha": "${{ github.event.pull_request.merge_commit_sha }}",
+            "actor": "${{ github.actor }}",
+            "drift_issue_number": "${{ needs.metadata.outputs.drift_issue_number }}",
+            "jira_key": "${{ needs.metadata.outputs.jira_key }}",
+            "change_request_id": "${{ needs.metadata.outputs.change_request_id }}",
+            "environment": "${{ needs.metadata.outputs.environment }}",
+            "cloud_provider": "${{ needs.metadata.outputs.cloud_provider }}",
+            "drift_verify_exit_code": "${{ steps.verify_drift.outputs.exit_code }}"
+          }
+          EOF
+
+      - name: Upload Change Audit Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-audit-pr-${{ github.event.pull_request.number }}
+          path: .artifacts/drift-audit-pr-${{ github.event.pull_request.number }}.json
+
+      - name: Close Drift Issue (Verified)
+        if: steps.verify_drift.outputs.exit_code == '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = Number(process.env.DRIFT_ISSUE_NUMBER);
+            const pr = context.payload.pull_request.number;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `Drift remediation merged in PR #${pr} and verification returned no drift. Closing issue.`
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              state: "closed"
+            });
+        env:
+          DRIFT_ISSUE_NUMBER: ${{ needs.metadata.outputs.drift_issue_number }}
+
+      - name: Comment Drift Issue (Still Drifted)
+        if: steps.verify_drift.outputs.exit_code == '2'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = Number(process.env.DRIFT_ISSUE_NUMBER);
+            const pr = context.payload.pull_request.number;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `PR #${pr} merged but drift verification still reports pending changes. Manual follow-up required.`
+            });
+        env:
+          DRIFT_ISSUE_NUMBER: ${{ needs.metadata.outputs.drift_issue_number }}
+
+      - name: Transition Jira to Done
+        if: steps.verify_drift.outputs.exit_code == '0' && vars.ENABLE_JIRA_INTEGRATION == 'true' && needs.metadata.outputs.jira_key != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          transitions="$(curl -sS -u "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "${JIRA_BASE_URL}/rest/api/3/issue/${JIRA_KEY}/transitions")"
+          done_id="$(echo "${transitions}" | jq -r '.transitions[] | select((.name|ascii_downcase)=="done" or (.name|ascii_downcase)=="closed" or (.name|ascii_downcase)=="resolve issue") | .id' | head -n1)"
+          if [ -z "${done_id}" ]; then
+            echo "No Done/Closed transition found for Jira issue ${JIRA_KEY}; skipping transition."
+            exit 0
+          fi
+          curl -sS -u "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -X POST \
+            --data "{\"transition\":{\"id\":\"${done_id}\"}}" \
+            "${JIRA_BASE_URL}/rest/api/3/issue/${JIRA_KEY}/transitions" >/dev/null
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_KEY: ${{ needs.metadata.outputs.jira_key }}
+
+      - name: Send Closure Notification
+        if: vars.ENABLE_DRIFT_NOTIFICATIONS == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$(jq -n \
+            --arg event "drift_remediation_merged" \
+            --arg repo "${{ github.repository }}" \
+            --arg pr "${{ github.event.pull_request.number }}" \
+            --arg issue "${{ needs.metadata.outputs.drift_issue_number }}" \
+            --arg jira "${{ needs.metadata.outputs.jira_key }}" \
+            --arg cr "${{ needs.metadata.outputs.change_request_id }}" \
+            --arg verify "${{ steps.verify_drift.outputs.exit_code }}" \
+            '{event:$event,repository:$repo,pull_request:$pr,drift_issue:$issue,jira_key:$jira,change_request:$cr,verify_exit_code:$verify}')"
+          curl -sS -X POST -H "Content-Type: application/json" --data "${payload}" "${DRIFT_NOTIFICATION_WEBHOOK_URL}"
+        env:
+          DRIFT_NOTIFICATION_WEBHOOK_URL: ${{ secrets.DRIFT_NOTIFICATION_WEBHOOK_URL }}
+

@@ -1,0 +1,18 @@
+﻿{% if istio_enabled and istio_egress_enabled %}
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: {{ chart_name }}-egress
+  namespace: {{ namespace }}
+spec:
+  hosts:
+    - "{{ istio_egress_host }}"
+  location: MESH_EXTERNAL
+  resolution: DNS
+  ports:
+    - number: {{ istio_egress_port }}
+      name: {{ istio_egress_protocol | lower }}
+      protocol: {{ istio_egress_protocol }}
+{% else %}
+# Istio egress service entry disabled.
+{% endif %}

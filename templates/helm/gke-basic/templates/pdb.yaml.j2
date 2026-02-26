@@ -1,0 +1,19 @@
+﻿{% if pdb_enabled %}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ chart_name }}-pdb
+  namespace: {{ namespace }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ chart_name }}
+{% if pdb_min_available %}
+  minAvailable: {{ pdb_min_available }}
+{% endif %}
+{% if pdb_max_unavailable %}
+  maxUnavailable: {{ pdb_max_unavailable }}
+{% endif %}
+{% else %}
+# PodDisruptionBudget disabled.
+{% endif %}

@@ -1,0 +1,149 @@
+﻿apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ chart_name }}
+  namespace: {{ namespace }}
+  labels:
+    app: {{ chart_name }}
+spec:
+  replicas: {{ replica_count }}
+  selector:
+    matchLabels:
+      app: {{ chart_name }}
+  template:
+    metadata:
+      labels:
+        app: {{ chart_name }}
+      annotations:
+{% if istio_enabled %}
+        sidecar.istio.io/inject: "true"
+{% endif %}
+{% if metrics_enabled and istio_enabled %}
+        prometheus.istio.io/merge-metrics: "true"
+{% endif %}
+{% if metrics_enabled and metrics_app_enabled %}
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "{{ metrics_app_path }}"
+        prometheus.io/port: "{{ metrics_app_port }}"
+{% endif %}
+{% if logs_enabled and logs_provider == "grafana-cloud" %}
+        promtail.grafana.com/scrape: "true"
+        promtail.grafana.com/job: "{{ chart_name }}"
+{% endif %}
+{% if logs_enabled and logs_provider == "splunk" %}
+        fluentbit.io/parser: "json"
+        fluentbit.io/exclude: "false"
+{% endif %}
+{% if telemetry_enabled and telemetry_traces_enabled %}
+        instrumentation.opentelemetry.io/inject-sdk: "true"
+{% endif %}
+    spec:
+{% if affinity_enabled %}
+      affinity:
+        {{ affinity_type }}:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - {{ chart_name }}
+                topologyKey: {{ affinity_topology_key }}
+{% endif %}
+      containers:
+        - name: {{ chart_name }}
+          image: "{{ image_repository }}:{{ image_tag }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LOG_ENABLED
+              value: "{{ logs_enabled }}"
+            - name: LOG_FORMAT
+              value: "{{ logs_format }}"
+            - name: LOG_LEVEL
+              value: "{{ logs_level }}"
+            - name: LOG_PROVIDER
+              value: "{{ logs_provider }}"
+            - name: TELEMETRY_ENABLED
+              value: "{{ telemetry_enabled }}"
+            - name: TELEMETRY_PROVIDER
+              value: "{{ telemetry_provider }}"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "{{ telemetry_otlp_endpoint }}"
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: "{{ telemetry_otlp_protocol }}"
+            - name: OTEL_METRICS_EXPORTER
+              value: "{% if telemetry_enabled and telemetry_metrics_enabled %}otlp{% else %}none{% endif %}"
+            - name: OTEL_TRACES_EXPORTER
+              value: "{% if telemetry_enabled and telemetry_traces_enabled %}otlp{% else %}none{% endif %}"
+            - name: OTEL_LOGS_EXPORTER
+              value: "{% if telemetry_enabled and telemetry_logs_enabled %}otlp{% else %}none{% endif %}"
+            - name: GRAFANA_CLOUD_LOGS_URL
+              value: "{{ logs_grafana_cloud_logs_url }}"
+            - name: GRAFANA_CLOUD_TENANT_ID
+              value: "{{ logs_grafana_cloud_tenant_id }}"
+            - name: SPLUNK_HEC_URL
+              value: "{{ logs_splunk_hec_url }}"
+            - name: SPLUNK_INDEX
+              value: "{{ logs_splunk_index }}"
+            - name: SPLUNK_SOURCE
+              value: "{{ logs_splunk_source }}"
+            - name: SPLUNK_SOURCETYPE
+              value: "{{ logs_splunk_sourcetype }}"
+            - name: AUDIT_ENABLED
+              value: "{{ audit_enabled }}"
+            - name: AUDIT_MODE
+              value: "{{ audit_mode }}"
+            - name: AUDIT_INCLUDE_REQUEST_BODY
+              value: "{{ audit_include_request_body }}"
+            - name: AUDIT_POLICY_FILE
+              value: "/etc/platform/audit/policy.yaml"
+{% if logs_enabled and logs_provider == "grafana-cloud" %}
+            - name: GRAFANA_CLOUD_AUTH_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ logs_grafana_cloud_auth_secret_name }}
+                  key: username
+            - name: GRAFANA_CLOUD_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ logs_grafana_cloud_auth_secret_name }}
+                  key: token
+{% endif %}
+{% if logs_enabled and logs_provider == "splunk" %}
+            - name: SPLUNK_HEC_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ logs_splunk_token_secret_name }}
+                  key: token
+{% endif %}
+{% if telemetry_enabled %}
+            - name: OTEL_EXPORTER_OTLP_HEADERS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ telemetry_auth_secret_name }}
+                  key: headers
+{% endif %}
+          ports:
+            - name: http
+              containerPort: {{ container_port }}
+{% if metrics_enabled and metrics_app_enabled and metrics_app_port != container_port %}
+            - name: metrics
+              containerPort: {{ metrics_app_port }}
+{% endif %}
+          volumeMounts:
+            - name: audit-policy
+              mountPath: /etc/platform/audit
+              readOnly: true
+          resources:
+            requests:
+              cpu: "{{ cpu_request }}"
+              memory: "{{ memory_request }}"
+            limits:
+              cpu: "{{ cpu_limit }}"
+              memory: "{{ memory_limit }}"
+      volumes:
+        - name: audit-policy
+          configMap:
+            name: {{ chart_name }}-audit-policy

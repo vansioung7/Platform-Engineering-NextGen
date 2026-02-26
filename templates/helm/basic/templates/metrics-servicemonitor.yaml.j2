@@ -1,0 +1,28 @@
+﻿{% if metrics_enabled and metrics_service_monitor_enabled %}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ chart_name }}
+  namespace: {{ namespace }}
+  labels:
+    app: {{ chart_name }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ chart_name }}
+  endpoints:
+{% if metrics_app_enabled %}
+    - port: metrics
+      path: "{{ metrics_app_path }}"
+      interval: "{{ metrics_pod_monitor_interval }}"
+      scrapeTimeout: "{{ metrics_pod_monitor_scrape_timeout }}"
+{% endif %}
+{% if istio_enabled %}
+    - targetPort: 15090
+      path: /stats/prometheus
+      interval: "{{ metrics_pod_monitor_interval }}"
+      scrapeTimeout: "{{ metrics_pod_monitor_scrape_timeout }}"
+{% endif %}
+{% else %}
+# ServiceMonitor metrics emission disabled.
+{% endif %}

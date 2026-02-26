@@ -1,0 +1,33 @@
+﻿{% if hpa_enabled and not keda_enabled %}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ chart_name }}
+  namespace: {{ namespace }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ chart_name }}
+  minReplicas: {{ hpa_min_replicas }}
+  maxReplicas: {{ hpa_max_replicas }}
+  metrics:
+{% if hpa_cpu_utilization_target > 0 %}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ hpa_cpu_utilization_target }}
+{% endif %}
+{% if hpa_memory_utilization_target > 0 %}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ hpa_memory_utilization_target }}
+{% endif %}
+{% else %}
+# HPA disabled for this workload or managed by KEDA.
+{% endif %}

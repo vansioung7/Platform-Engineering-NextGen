@@ -1,0 +1,28 @@
+﻿{% if metrics_enabled and metrics_pod_monitor_enabled %}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ chart_name }}
+  namespace: {{ namespace }}
+  labels:
+    app: {{ chart_name }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ chart_name }}
+  podMetricsEndpoints:
+{% if istio_enabled %}
+    - targetPort: 15090
+      path: /stats/prometheus
+      interval: "{{ metrics_pod_monitor_interval }}"
+      scrapeTimeout: "{{ metrics_pod_monitor_scrape_timeout }}"
+{% endif %}
+{% if metrics_app_enabled %}
+    - targetPort: {{ metrics_app_port }}
+      path: "{{ metrics_app_path }}"
+      interval: "{{ metrics_pod_monitor_interval }}"
+      scrapeTimeout: "{{ metrics_pod_monitor_scrape_timeout }}"
+{% endif %}
+{% else %}
+# PodMonitor metrics emission disabled.
+{% endif %}

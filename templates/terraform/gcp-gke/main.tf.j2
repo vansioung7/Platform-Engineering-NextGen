@@ -1,0 +1,66 @@
+﻿terraform {
+  required_version = ">= 1.6.0"
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 6.0"
+    }
+  }
+}
+
+provider "google" {
+  project = "{{ project_id }}"
+  region  = "{{ region }}"
+}
+
+resource "google_container_cluster" "gke" {
+  name     = "{{ cluster_name }}"
+  location = "{{ region }}"
+
+  remove_default_node_pool = true
+  initial_node_count       = 1
+
+  network    = var.network
+  subnetwork = var.subnetwork
+
+  maintenance_policy {
+    recurring_window {
+      start_time = var.patch_window_start
+      end_time   = var.patch_window_end
+      recurrence = var.patch_window_recurrence
+    }
+  }
+
+  cluster_autoscaling {
+    enabled            = var.cluster_autoscaling_enabled
+    autoscaling_profile = var.cluster_autoscaling_profile
+  }
+}
+
+resource "google_container_node_pool" "primary_nodes" {
+  name     = "primary-node-pool"
+  location = "{{ region }}"
+  cluster  = google_container_cluster.gke.name
+
+  autoscaling {
+    min_node_count = var.node_pool_min_size
+    max_node_count = var.node_pool_max_size
+  }
+
+  node_count = var.node_pool_desired_size
+
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
+
+  node_config {
+    machine_type = var.machine_type
+    oauth_scopes = [
+      "https://www.googleapis.com/auth/cloud-platform"
+    ]
+    labels = {
+      project = "{{ project }}"
+    }
+  }
+}
