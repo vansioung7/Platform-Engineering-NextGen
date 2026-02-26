@@ -1,0 +1,56 @@
+sequenceDiagram
+    autonumber
+    actor S as Scheduler
+    participant GHAI as GHA infra-drift-detection
+    participant TF as Terraform
+    participant Cloud as Cloud API
+    participant GHW as GHA workload-drift-detection
+    participant Helm as Helm
+    participant OPA as OPA Conftest
+    participant Argo as Argo CD
+    participant GH as GitHub Issues
+    participant GOV as drift-remediation-governance
+
+    rect rgb(240, 249, 255)
+    Note over S,GHAI: Infrastructure Drift Loop
+    S->>GHAI: Scheduled/manual trigger
+    GHAI->>TF: init + plan -detailed-exitcode
+    TF->>Cloud: Compare desired vs actual infra
+    TF-->>GHAI: Exit code + tfplan
+    alt Infra drift detected (exit=2)
+        GHAI->>OPA: Validate tfplan against policy
+        GHAI->>GH: Open infra drift issue + artifacts
+    else No drift (exit=0)
+        GHAI-->>S: No issue
+    end
+    end
+
+    rect rgb(255, 247, 237)
+    Note over S,GHW: Workload Drift Loop (Helm + Argo CD)
+    S->>GHW: Scheduled/manual trigger
+    GHW->>Helm: lint + template manifests
+    GHW->>OPA: Policy check rendered manifests
+    GHW->>Argo: app get (sync/health)
+    alt Policy fail OR Argo not Synced
+        GHW->>GH: Open workload drift issue + artifacts
+    else Healthy + Synced
+        GHW-->>S: No issue
+    end
+    end
+
+    rect rgb(236, 253, 245)
+    Note over GOV,GH: Audited Remediation Closure
+    GOV->>GOV: Validate PR metadata + approvals
+    alt Drift Type = infra
+        GOV->>TF: Re-run plan verification
+    else Drift Type = workload
+        GOV->>Argo: Re-check sync status
+    end
+    alt Verification clean
+        GOV->>GH: Close issue + write audit artifact
+        GOV->>GH: Optional Jira transition/notification
+    else Still drifted
+        GOV->>GH: Keep issue open + follow-up comment
+    end
+    end
+

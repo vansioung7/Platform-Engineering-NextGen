@@ -1,0 +1,40 @@
+flowchart LR
+    classDef ctrl fill:#E8F0FE,stroke:#3B82F6,color:#0F172A,stroke-width:1px;
+    classDef sec fill:#ECFDF5,stroke:#10B981,color:#064E3B,stroke-width:1px;
+    classDef drift fill:#FFF7ED,stroke:#F97316,color:#7C2D12,stroke-width:1px;
+    classDef ext fill:#F8FAFC,stroke:#64748B,color:#0F172A,stroke-width:1px;
+
+    Dev[Engineers]:::ext --> Repo[GitHub Repository]:::ctrl
+    Repo --> Plan[infra-plan]:::ctrl
+    Repo --> Apply[infra-apply]:::ctrl
+    Repo --> InfraDrift[infra-drift-detection]:::drift
+    Repo --> WorkloadDrift[workload-drift-detection]:::drift
+    Repo --> Governance[drift-remediation-governance]:::ctrl
+
+    Plan --> TFPlan[Terraform Plan JSON]:::ctrl
+    TFPlan --> OPAI[OPA Conftest<br/>Terraform Policies]:::sec
+    OPAI --> PlanGate{Policy Pass?}:::sec
+    PlanGate -->|Yes| Apply
+    PlanGate -->|No| Block[Pipeline Blocked]:::sec
+
+    Apply --> Cloud[(AWS / Azure / GCP)]:::ext
+    InfraDrift --> Cloud
+    InfraDrift --> NativeChecks[Native Cloud Checks<br/>Optional Toggle]:::drift
+    InfraDrift --> DriftIssue[GitHub Drift Issue]:::drift
+
+    WorkloadDrift --> Helm[Helm Lint + Template]:::drift
+    Helm --> OPAK[OPA Conftest<br/>K8s Manifest Policies]:::sec
+    WorkloadDrift --> Argo[Argo CD<br/>Sync/Health Check]:::drift
+    OPAK --> WorkloadIssue[GitHub Workload Drift Issue]:::drift
+    Argo --> WorkloadIssue
+
+    DriftIssue --> Ticketing[Jira + Notification Workflow]:::ctrl
+    WorkloadIssue --> Ticketing
+
+    Repo --> PR[Remediation Pull Request]:::ctrl
+    PR --> Governance
+    Governance --> ReverifyInfra[Terraform Re-Verification]:::drift
+    Governance --> ReverifyWorkload[Argo CD Re-Verification]:::drift
+    Governance --> Audit[Audit Artifact + Traceability]:::sec
+    Governance --> Closure[Issue/Jira Closure<br/>After Approval + Verification]:::sec
+
