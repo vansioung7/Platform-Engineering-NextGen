@@ -1,0 +1,45 @@
+name: confluence-preflight-pe
+
+on:
+  workflow_dispatch:
+    inputs:
+      page_title:
+        description: "Page title to validate for tenant isolation"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build PE Runtime Config
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp
+          cat > .tmp/confluence.pe.env <<EOF
+          CONFLUENCE_BASE_URL=${PE_CONFLUENCE_BASE_URL}
+          CONFLUENCE_USER_EMAIL=${PE_CONFLUENCE_USER_EMAIL}
+          CONFLUENCE_API_TOKEN=${PE_CONFLUENCE_API_TOKEN}
+          CONFLUENCE_SPACE_KEY=PE
+          EOF
+        env:
+          PE_CONFLUENCE_BASE_URL: ${{ secrets.PE_CONFLUENCE_BASE_URL }}
+          PE_CONFLUENCE_USER_EMAIL: ${{ secrets.PE_CONFLUENCE_USER_EMAIL }}
+          PE_CONFLUENCE_API_TOKEN: ${{ secrets.PE_CONFLUENCE_API_TOKEN }}
+
+      - name: Validate PE Tenant Isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/validate-confluence-target.sh
+          ./scripts/validate-confluence-target.sh "PE" "PE" ".tmp/confluence.pe.env" "${PAGE_TITLE}"
+        env:
+          PAGE_TITLE: ${{ github.event.inputs.page_title }}
+

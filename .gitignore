@@ -1,3 +1,6 @@
 confluence.env
+confluence.pe.env
+confluence.sre-agentic.env
+config/confluence/*.env
 __pycache__/
 *.pyc

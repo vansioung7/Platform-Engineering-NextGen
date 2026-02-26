@@ -1,0 +1,51 @@
+name: confluence-preflight-sre-agentic
+
+on:
+  workflow_dispatch:
+    inputs:
+      page_title:
+        description: "Page title to validate for tenant isolation"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build SRE-Agentic Runtime Config
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${SRE_AGENTIC_SPACE_KEY}" ]; then
+            echo "SRE_AGENTIC_SPACE_KEY repository variable is required." >&2
+            exit 1
+          fi
+          mkdir -p .tmp
+          cat > .tmp/confluence.sre-agentic.env <<EOF
+          CONFLUENCE_BASE_URL=${SRE_AGENTIC_CONFLUENCE_BASE_URL}
+          CONFLUENCE_USER_EMAIL=${SRE_AGENTIC_CONFLUENCE_USER_EMAIL}
+          CONFLUENCE_API_TOKEN=${SRE_AGENTIC_CONFLUENCE_API_TOKEN}
+          CONFLUENCE_SPACE_KEY=${SRE_AGENTIC_SPACE_KEY}
+          EOF
+        env:
+          SRE_AGENTIC_CONFLUENCE_BASE_URL: ${{ secrets.SRE_AGENTIC_CONFLUENCE_BASE_URL }}
+          SRE_AGENTIC_CONFLUENCE_USER_EMAIL: ${{ secrets.SRE_AGENTIC_CONFLUENCE_USER_EMAIL }}
+          SRE_AGENTIC_CONFLUENCE_API_TOKEN: ${{ secrets.SRE_AGENTIC_CONFLUENCE_API_TOKEN }}
+          SRE_AGENTIC_SPACE_KEY: ${{ vars.SRE_AGENTIC_SPACE_KEY }}
+
+      - name: Validate SRE-Agentic Tenant Isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/validate-confluence-target.sh
+          ./scripts/validate-confluence-target.sh "SRE-AGENTIC" "${SRE_AGENTIC_SPACE_KEY}" ".tmp/confluence.sre-agentic.env" "${PAGE_TITLE}"
+        env:
+          PAGE_TITLE: ${{ github.event.inputs.page_title }}
+          SRE_AGENTIC_SPACE_KEY: ${{ vars.SRE_AGENTIC_SPACE_KEY }}
+
