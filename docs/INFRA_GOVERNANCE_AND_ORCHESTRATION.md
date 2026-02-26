@@ -128,3 +128,4 @@ GCP:
 Detailed setup guide:
 - `docs/OIDC_SETUP.md`
 - `docs/DRIFT_GOVERNANCE_WORKFLOW.md`
+- `docs/architecture/PLATFORM_GOVERNANCE_ARCHITECTURE.md`

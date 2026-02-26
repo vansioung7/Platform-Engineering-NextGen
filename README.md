@@ -54,6 +54,7 @@ Implementation guide:
 - `docs/OIDC_SETUP.md`
 - `docs/DRIFT_GOVERNANCE_WORKFLOW.md`
 - `docs/CONFLUENCE_TENANT_ISOLATION.md`
+- `docs/architecture/PLATFORM_GOVERNANCE_ARCHITECTURE.md`
 
 ## Unified platform payload (new cluster)
 ```json
